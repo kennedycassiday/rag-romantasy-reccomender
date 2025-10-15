@@ -1,8 +1,9 @@
 import json
 import sys
 import re
-# import chromadb
-# from openai import OpenAI
+import os
+import chromadb
+from openai import OpenAI
 
 EMBED_MODEL = "text-embedding-3-small"
 CHROMA_DIR = "db"
@@ -92,9 +93,9 @@ def main():
     reset = True
     batch_size = 64
 
-    # if not os.getenv("OPENAI_API_KEY"):
-    #     print("ERROR: set OPENAI_API_KEY in your environment.", file=sys.stderr)
-    #     sys.exit(1)
+    if not os.getenv("OPENAI_API_KEY"):
+        print("ERROR: set OPENAI_API_KEY in your environment.", file=sys.stderr)
+        sys.exit(1)
 
     try:
         #Load data
@@ -121,23 +122,36 @@ def main():
         print(f"Cleaned: {len(cleaned)}, Skipped: {skipped}.")
 
     # Prepare IDs, documents (embedding text), and metadata (for filters/reranking)
-    ids = [book['id'] for book in cleaned]
-    documents = [build_embed_text(book) for book in cleaned]
-    metadatas = [{
-        "title": book["title"],
-        "authors": book["authors"],
-        "genres": book["genres"],
-        "tropes": book["tropes"],
-        "spice": book.["spice_level"],
-        "url": book["source_url"],
-        "rating": book["rating"],
-        "year": book["year"]
-    } for book in cleaned]
+        id = [book['id'] for book in cleaned]
+        documents = [build_embed_text(book) for book in cleaned]
+        metadatas = [{
+            "title": book["title"],
+            "authors": book["authors"],
+            "genres": book["genres"],
+            "tropes": book["tropes"],
+            "spice": book["spice_level"],
+            "url": book["source_url"],
+            "rating": book["rating"],
+            "year": book["year"]
+        } for book in cleaned]
 
-    # Initialize OpenAI + Chroma
-    client = OpenAI()
-    chroma = chromadb.PersistentClient(path=CHROMA_DIR)
+        # Initialize OpenAI + Chroma
+        client = OpenAI()
+        chroma = chromadb.PersistentClient(path=CHROMA_DIR)
+        coll = chroma.get_or_create_collection(COLLECTION_NAME)
 
+        #Embed in batches
+        embeddings = []
+        total = 0
+        for chunk in batch(documents, 64):
+            resp = client.embeddings.create(model=EMBED_MODEL, input=chunk)
+            embeddings.extend([d.embedding for d in resp.data])
+            total += len(chunk)
+            print(f"Embedded {total}/{len(documents)}")
+
+        #Store vectors/docs/metadata in Chroma
+        coll.add(ids=ids, documents=documents, metadatas=metadatas, embeddings=embeddings)
+        print(f"Stored {len(ids)} records in '{COLLECTION_NAME}' at {CHROMA_DIR}/")
 
         #Show sample book
         if books:
