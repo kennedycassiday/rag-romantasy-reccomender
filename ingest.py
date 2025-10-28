@@ -5,6 +5,9 @@ import os
 import chromadb
 from openai import OpenAI
 
+from dotenv import load_dotenv
+load_dotenv()
+
 EMBED_MODEL = "text-embedding-3-small"
 CHROMA_DIR = "db"
 COLLECTION_NAME = "romantasy"
@@ -29,6 +32,15 @@ def load_seed(path):
         print("ERROR: Seed file must be a non-empty JSON array.", file=sys.stderr)
         sys.exit(1)
     return data
+
+def dedupe_in_memory(items):
+    seen = {}
+    for item in items:
+        key = item['id']
+        best = seen.get(key)
+        if not best or len(item['description']) > len(best['description']):
+            seen[key] = item
+    return list(seen.values())
 
 def clean_text(t):
     if not t:
@@ -88,6 +100,15 @@ def batch(iterable, size):
     for i in range(0, len(iterable), size):
         yield iterable[i: i + size]
 
+def get_existing_ids(coll, candidate_ids, chunk=1000):
+    existing = set()
+    for i in range(0, len(candidate_ids), chunk):
+        ids_slice = candidate_ids[i:i+chunk]
+        got = coll.get(ids=ids_slice)
+        existing.update(got.get("ids", []))
+    return existing
+
+
 def main():
     path = "data/books_seed.json"
     reset = True
@@ -100,6 +121,7 @@ def main():
     try:
         #Load data
         books = load_seed(path)
+        books = dedupe_in_memory(books)
         print(f"Successfully loaded {len(books)} books")
 
         #Clean data
@@ -122,13 +144,13 @@ def main():
         print(f"Cleaned: {len(cleaned)}, Skipped: {skipped}.")
 
     # Prepare IDs, documents (embedding text), and metadata (for filters/reranking)
-        id = [book['id'] for book in cleaned]
+        ids = [book['id'] for book in cleaned]
         documents = [build_embed_text(book) for book in cleaned]
         metadatas = [{
             "title": book["title"],
-            "authors": book["authors"],
-            "genres": book["genres"],
-            "tropes": book["tropes"],
+            "authors": ", ".join(book["authors"]),
+            "genres": ", ".join(book["genres"]),
+            "tropes": ", ".join(book["tropes"]),
             "spice": book["spice_level"],
             "url": book["source_url"],
             "rating": book["rating"],
