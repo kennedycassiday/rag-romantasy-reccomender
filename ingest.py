@@ -171,9 +171,25 @@ def main():
             total += len(chunk)
             print(f"Embedded {total}/{len(documents)}")
 
-        #Store vectors/docs/metadata in Chroma
-        coll.add(ids=ids, documents=documents, metadatas=metadatas, embeddings=embeddings)
-        print(f"Stored {len(ids)} records in '{COLLECTION_NAME}' at {CHROMA_DIR}/")
+        #skip duplicates
+        existing = get_existing_ids(coll, ids)
+        if existing:
+            print(f"{len(existing)} IDs already in collection; they will be skipped.")
+
+        # filter new records
+        to_add = [(i, id_) for i, id_ in enumerate(ids) if id_ not in existing]
+
+        if not to_add:
+            print("Nothing new to add.")
+        else:
+            add_ids        = [ids[i] for i,_ in to_add]
+            add_docs       = [documents[i] for i,_ in to_add]
+            add_metas      = [metadatas[i] for i,_ in to_add]
+            add_embeddings = [embeddings[i] for i,_ in to_add]
+
+            #Store vectors/docs/metadata in Chroma
+            coll.add(ids=add_ids, documents=add_docs, metadatas=add_metas, embeddings=add_embeddings)
+            print(f"Added {len(add_ids)} new records in '{COLLECTION_NAME}' at {CHROMA_DIR}/ (skipped {len(existing)} duplicates).")
 
         #Show sample book
         if books:
